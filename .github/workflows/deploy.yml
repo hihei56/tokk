@@ -1,0 +1,34 @@
+name: Deploy to OCI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.OCI_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.OCI_SERVER_IP }} >> ~/.ssh/known_hosts
+
+    - name: Deploy to OCI
+      env:
+        OCI_SERVER_IP: ${{ secrets.OCI_SERVER_IP }}
+        OCI_SSH_USER: ${{ secrets.OCI_SSH_USER }}
+      run: |
+        rsync -avz --delete --exclude '.env' --exclude 'messageData.json' -e "ssh -i ~/.ssh/id_rsa" . ${OCI_SSH_USER}@${OCI_SERVER_IP}:~/discord-anonymous-bot/
+        ssh -i ~/.ssh/id_rsa ${OCI_SSH_USER}@${OCI_SERVER_IP} << 'EOF'
+          cd ~/discord-anonymous-bot
+          npm install
+          pm2 restart discord-bot || pm2 start anonbot.js --name discord-bot
+          pm2 save
+        EOF
