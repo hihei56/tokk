@@ -1,0 +1,21 @@
+# Node.js 関連
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn.lock
+package-lock.json
+
+# 環境変数ファイル
+.env
+
+# データファイル
+messageData.json
+
+# ローカル開発用
+.DS_Store
+.vscode/
+*.log
+
+# バックアップや一時ファイル
+*.bak
+*.tmp

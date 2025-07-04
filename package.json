@@ -1,0 +1,14 @@
+{
+  "name": "discord-anonymous-bot",
+  "version": "1.0.0",
+  "description": "Anonymous message bot with health check, reveal command, and button cleanup for Discord",
+  "main": "anonbot.js",
+  "scripts": {
+    "start": "node anonbot.js",
+    "start:pm2": "pm2 start anonbot.js --name discord-bot"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  }
+}
