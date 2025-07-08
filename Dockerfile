@@ -19,4 +19,4 @@ EXPOSE 8080
 # 環境変数はGCE側で設定する想定なのでDockerfileには書かない
 
 # アプリ起動コマンド
-CMD ["node", "index.js"]
+CMD ["node", "anonbot.js"]
