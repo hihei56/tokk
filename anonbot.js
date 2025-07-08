@@ -1,10 +1,21 @@
 require('dotenv').config({ path: `${__dirname}/.env` });
-const { Client, GatewayIntentBits, ButtonBuilder, ButtonStyle, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, WebhookClient, SlashCommandBuilder, PermissionsBitField } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  WebhookClient,
+  SlashCommandBuilder,
+  PermissionsBitField,
+} = require('discord.js');
 const fs = require('fs').promises;
 const path = require('path');
 const http = require('http');
 
-// 環境変数の確認
 const requiredEnv = ['BOT_TOKEN', 'CHANNEL_ID', 'WEBHOOK_URL', 'GUILD_ID'];
 for (const env of requiredEnv) {
   if (!process.env[env]) {
@@ -19,7 +30,39 @@ console.log('[DEBUG] 環境変数:', {
   GUILD_ID: process.env.GUILD_ID ? '読み込み成功' : 'undefined',
 });
 
-// HTTPサーバー（ヘルスチェック用）
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,
+  ],
+});
+
+const dataFile = path.join(__dirname, 'data', 'messageData.json');
+let messageData = { lastMessageId: 0, messages: {} };
+
+async function loadData() {
+  try {
+    const data = await fs.readFile(dataFile, 'utf8');
+    messageData = JSON.parse(data);
+    console.log('[INFO] データファイル読み込み成功');
+  } catch (error) {
+    console.log('[WARN] データファイルが見つからないため、新規作成します。');
+    await saveData();
+  }
+}
+
+async function saveData() {
+  try {
+    await fs.mkdir(path.dirname(dataFile), { recursive: true });
+    await fs.writeFile(dataFile, JSON.stringify(messageData, null, 2));
+    console.log('[INFO] データ保存成功');
+  } catch (error) {
+    console.error('[ERROR] データ保存失敗:', error.message);
+    throw error;
+  }
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     const healthStatus = {
@@ -49,45 +92,6 @@ server.listen(process.env.PORT || 8080, () => {
   console.log(`[INFO] HTTP server running on port ${process.env.PORT || 8080}`);
 });
 
-// クライアントの初期化
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMembers,
-  ],
-});
-
-// データ保存用のファイルパス
-const dataFile = path.join(__dirname, 'messageData.json');
-
-// メッセージ番号を管理するオブジェクト
-let messageData = { lastMessageId: 0, messages: {} };
-
-// データの読み込み
-async function loadData() {
-  try {
-    const data = await fs.readFile(dataFile, 'utf8');
-    messageData = JSON.parse(data);
-    console.log('[INFO] データファイル読み込み成功');
-  } catch (error) {
-    console.log('[WARN] データファイルが見つからないため、新規作成します。');
-    await saveData();
-  }
-}
-
-// データの保存
-async function saveData() {
-  try {
-    await fs.writeFile(dataFile, JSON.stringify(messageData, null, 2));
-    console.log('[INFO] データ保存成功');
-  } catch (error) {
-    console.error('[ERROR] データ保存失敗:', error.message);
-    throw error; // エラーを上位に伝播
-  }
-}
-
-// 古いボタンメッセージを削除
 async function clearOldButtons(channel) {
   try {
     const messages = await channel.messages.fetch({ limit: 100 });
@@ -101,22 +105,19 @@ async function clearOldButtons(channel) {
       await msg.delete();
       console.log(`[INFO] 古いボタンメッセージを削除: ${msg.id}`);
     }
+    console.log('[INFO] 古いボタンの削除処理が完了しました');
   } catch (error) {
     console.error('[ERROR] 古いボタンメッセージの削除失敗:', error.message);
   }
 }
 
-// スラッシュコマンドの登録
 async function registerSlashCommands() {
   const commands = [
     new SlashCommandBuilder()
       .setName('reveal')
       .setDescription('指定したレス番号の匿名メッセージの送信者を開示します（管理者のみ）')
       .addIntegerOption((option) =>
-        option
-          .setName('message_id')
-          .setDescription('開示するメッセージのレス番号')
-          .setRequired(true)
+        option.setName('message_id').setDescription('開示するメッセージのレス番号').setRequired(true)
       )
       .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild),
   ];
@@ -127,6 +128,7 @@ async function registerSlashCommands() {
       await guild.commands.set(commands);
       console.log('[INFO] スラッシュコマンドをサーバーに登録しました');
     } else {
+      console.log('[WARN] ギルドが見つからないため、グローバルにコマンドを登録します');
       await client.application.commands.set(commands);
       console.log('[INFO] スラッシュコマンドをグローバルに登録しました');
     }
@@ -135,21 +137,6 @@ async function registerSlashCommands() {
   }
 }
 
-// ボットの準備完了時
-client.once('ready', async () => {
-  console.log(`[INFO] ログインしました: ${client.user.tag} (ID: ${client.user.id}) - ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })} JST`);
-  await loadData();
-  await registerSlashCommands();
-  const channel = client.channels.cache.get(process.env.CHANNEL_ID);
-  if (channel) {
-    await clearOldButtons(channel);
-    await setupButton(channel);
-  } else {
-    console.error('[ERROR] チャンネルが見つかりません。');
-  }
-});
-
-// ボタンのセットアップ
 async function setupButton(channel) {
   const button = new ButtonBuilder()
     .setCustomId('anonymous_message_button')
@@ -166,13 +153,24 @@ async function setupButton(channel) {
   }
 }
 
-// インタラクション処理
+client.once('ready', async () => {
+  console.log(`[INFO] ログインしました: ${client.user.tag}`);
+  await loadData();
+  await registerSlashCommands();
+  const channel = client.channels.cache.get(process.env.CHANNEL_ID);
+  if (channel) {
+    console.log('[INFO] ボット再起動に伴いボタンを再配置します');
+    await clearOldButtons(channel);
+    await setupButton(channel);
+    console.log('[INFO] 再起動後のボタン再配置が完了しました');
+  } else {
+    console.error('[FATAL] チャンネルが見つかりません: CHANNEL_ID=' + process.env.CHANNEL_ID);
+  }
+});
+
 client.on('interactionCreate', async (interaction) => {
-  // ボタン処理
   if (interaction.isButton() && interaction.customId === 'anonymous_message_button') {
-    const modal = new ModalBuilder()
-      .setCustomId('anonymous_message_modal')
-      .setTitle('匿名メッセージ');
+    const modal = new ModalBuilder().setCustomId('anonymous_message_modal').setTitle('匿名メッセージ');
 
     const messageInput = new TextInputBuilder()
       .setCustomId('message_input')
@@ -193,66 +191,47 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
-  // モーダル送信処理
   if (interaction.isModalSubmit() && interaction.customId === 'anonymous_message_modal') {
     const message = interaction.fields.getTextInputValue('message_input');
-    console.log(`[DEBUG] モーダル入力受信: ${message}`);
-
-    // 改行チェック
     const lineBreaks = (message.match(/\n/g) || []).length;
     if (lineBreaks > 1) {
       await interaction.reply({ content: '改行は1回までです。', ephemeral: true });
-      console.log('[INFO] 改行制限エラー');
       return;
     }
 
-    // @everyone や @here を無効化
-    const sanitizedMessage = `[#${messageData.lastMessageId + 1}] ${message
-      .replace(/@everyone/g, '@-everyone')
-      .replace(/@here/g, '@-here')}`;
-    console.log(`[DEBUG] サニタイズされたメッセージ: ${sanitizedMessage}`);
-
-    // Webhook でメッセージ送信
+    const sanitizedMessage = message.replace(/@everyone/g, '@-everyone').replace(/@here/g, '@-here');
     let webhookSuccess = false;
     try {
       const webhook = new WebhookClient({ url: process.env.WEBHOOK_URL });
       messageData.lastMessageId += 1;
       const messageId = messageData.lastMessageId;
-
-      await webhook.send({ content: sanitizedMessage });
-      console.log(`[INFO] 匿名メッセージ送信成功: レス番号 ${messageId}`);
+      await webhook.send({ content: sanitizedMessage, username: `${messageId} 飯能の名無しさん ` });
       webhookSuccess = true;
-
-      // メッセージデータに送信者情報を保存
       messageData.messages[messageId] = {
         content: sanitizedMessage,
         timestamp: new Date().toISOString(),
         authorId: interaction.user.id,
       };
       await saveData();
-      console.log(`[INFO] メッセージデータ保存成功: レス番号 ${messageId}`);
-
+      const channel = client.channels.cache.get(process.env.CHANNEL_ID);
+      if (channel) {
+        await clearOldButtons(channel);
+        await setupButton(channel);
+      }
       await interaction.reply({ content: '匿名メッセージを送信しました！', ephemeral: true });
     } catch (error) {
-      console.error('[ERROR] モーダル送信処理失敗:', {
-        message: error.message,
-        stack: error.stack,
-        webhookSuccess,
-      });
+      console.error('[ERROR] モーダル送信処理失敗:', error);
       if (webhookSuccess) {
-        // Webhook送信は成功したが、データ保存または返信でエラー
-        await interaction.reply({ content: 'メッセージは送信されましたが、処理中にエラーが発生しました。管理者にお問い合わせください。', ephemeral: true });
+        await interaction.reply({ content: '送信済みですが、内部エラーが発生しました。', ephemeral: true });
       } else {
         await interaction.reply({ content: 'メッセージ送信に失敗しました。', ephemeral: true });
       }
     }
   }
 
-  // スラッシュコマンド処理
   if (interaction.isCommand() && interaction.commandName === 'reveal') {
     if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-      await interaction.reply({ content: 'このコマンドはサーバー管理者専用です。', ephemeral: true });
-      console.log('[INFO] 権限不足で/revealコマンド拒否');
+      await interaction.reply({ content: 'このコマンドは管理者専用です。', ephemeral: true });
       return;
     }
 
@@ -260,8 +239,7 @@ client.on('interactionCreate', async (interaction) => {
     const messageDataEntry = messageData.messages[messageId];
 
     if (!messageDataEntry) {
-      await interaction.reply({ content: `レス番号 ${messageId} のメッセージが見つかりません。`, ephemeral: true });
-      console.log(`[INFO] レス番号 ${messageId} が見つかりません`);
+      await interaction.reply({ content: `レス番号 ${messageId} は存在しません。`, ephemeral: true });
       return;
     }
 
@@ -275,28 +253,23 @@ client.on('interactionCreate', async (interaction) => {
       ].join('\n');
 
       await interaction.reply({ content, ephemeral: true });
-      console.log(`[INFO] レス番号 ${messageId} の送信者情報を開示: ${author.tag}`);
     } catch (error) {
-      console.error('[ERROR] 送信者情報取得失敗:', error.message);
+      console.error('[ERROR] ユーザー取得失敗:', error);
       await interaction.reply({ content: '送信者情報の取得に失敗しました。', ephemeral: true });
     }
   }
 });
 
-// エラーハンドリング（インテントエラー対応強化）
 client.on('error', (error) => {
   console.error('[ERROR] クライアントエラー:', error.message);
   if (error.message.includes('disallowed intents')) {
-    console.error('[FATAL] 特権インテントが許可されていません。Discord Developer Portalで「Server Members Intent」を有効化してください。');
+    console.error('[FATAL] 特権インテントが許可されていません。');
     process.exit(1);
   }
 });
 
 process.on('uncaughtException', (error) => {
   console.error('[FATAL] Uncaught Exception:', error);
-  if (error.message.includes('disallowed intents')) {
-    console.error('[FATAL] 特権インテントが許可されていません。Discord Developer Portalで「Server Members Intent」を有効化してください。');
-  }
   process.exit(1);
 });
 
@@ -311,16 +284,11 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// プロセスを維持するためのハートビートログ
 setInterval(() => {
   console.log(`[INFO] プロセス稼働中: ${new Date().toISOString()}`);
 }, 60000);
 
-// ボットログイン
 client.login(process.env.BOT_TOKEN).catch((error) => {
   console.error('[FATAL] ログイン失敗:', error.message);
-  if (error.message.includes('disallowed intents')) {
-    console.error('[FATAL] 特権インテントが許可されていません。Discord Developer Portalで「Server Members Intent」を有効化してください。');
-  }
   process.exit(1);
 });
